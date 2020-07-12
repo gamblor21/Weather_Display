@@ -175,7 +175,6 @@ void loop() {
   readTrailer();
 
   // Read 48 hours of pressure to get trends
-  Serial.println("Pressure check start");
   sendHTTPRequest("pressure", 0, false, true);  
   if (checkHTTPStatus()) {
     Serial.println("Pressure check");
@@ -196,8 +195,38 @@ void loop() {
     float p24 = data[24][1].as<float>();
     float p12 = data[36][1].as<float>();
     float p6 = data[42][1].as<float>();
+
+    float p48diff = currentPressure - p48;
+    float p24diff = currentPressure - p24;
+    float p12diff = currentPressure - p12;
+    float p6diff = currentPressure - p6;
+
+    char p6Trend[20] = "\0";
+    if (abs(p6diff) > 0.35)
+      sprintf(p6Trend, "Rapidly ");
+
+    if(abs(p6diff) < 0.15) {
+      sprintf(p6Trend, "Steady");
+    }
+    else if (p6diff > 0.15) {
+      sprintf(p6Trend, "%sRising", p6Trend);
+    }
+    else if (p6diff < 0.15) {
+      sprintf(p6Trend, "%sFalling", p6Trend);
+    }
+    
+    Serial.printf("48: %f : %f", p48, p48diff); Serial.println();
+    Serial.printf("24: %f : %f", p24, p24diff); Serial.println();
+    Serial.printf("12: %f : %f", p12, p12diff); Serial.println();
+    Serial.printf(" 6: %f : %f", p6, p6diff); Serial.println();
+    Serial.println(p6Trend);
+
+    display.setCursor(130, 35);
+    display.setTextSize(1);
+    display.setTextColor(EPD_BLACK);
+    sprintf(buf, "%s", p6Trend);
+    display.print(buf);
   }
-  Serial.println("Pressure check done");
 
   readTrailer();
 
@@ -341,7 +370,7 @@ void loop() {
 
   client.stop();
   
-  //display.display();
+  display.display();
   Serial.println("Display done");
   //delay(300000);
   
@@ -427,8 +456,7 @@ bool sendHTTPRequest(char* feed, byte limit, bool connClose, bool isChart) {
     // hard coded right now to 1 hour resolution for 48 hours or data
     sprintf(request, "GET /api/v2/Gamblor21/feeds/%s/data/chart?hours=48&resolution=60", feed);
     sprintf(request, "%s HTTP/1.1", request);
-    Serial.println(request);
-  }
+   }
   else {  
     sprintf(request, "GET /api/v2/Gamblor21/feeds/%s/data?include=value", feed);
     if (limit > 0)
