@@ -31,12 +31,13 @@ THE SOFTWARE.
 #include <ArduinoJson.h>
 #include "arduino_secrets.h" 
 
-#define EPD_CS     10
-#define EPD_DC      9
+#define EPD_CS     13
+#define EPD_DC      12
 #define SRAM_CS     11
-#define EPD_RESET   5 // can set to -1 and share with microcontroller Reset!
+#define EPD_RESET   10 // can set to -1 and share with microcontroller Reset!
 #define EPD_BUSY    -1 // can set to -1 to not use a pin (will wait a fixed delay)
-
+#define DONE_PIN  5
+#define VBAT_PIN A7
 
 ///////please enter your sensitive data in the Secret tab/arduino_secrets.h
 char ssid[] = SECRET_SSID;        // your network SSID (name)
@@ -83,6 +84,9 @@ void setup() {
   }
   Serial.println("Connected to wifi");
   printWiFiStatus();
+
+  // set the done pin for the TPL5111 to output
+  pinMode(DONE_PIN, OUTPUT);
 
   rtc.begin(); // initialize RTC 24H format
   rtc.setTime(0, 0, 0);
@@ -167,7 +171,7 @@ void loop() {
     display.setCursor(10, 35);
     display.setTextSize(1);
     display.setTextColor(EPD_BLACK);
-    sprintf(buf, "Presure: %2.1f kPa", avgPressure);
+    sprintf(buf, "%2.1f kPa", avgPressure);
     Serial.println(buf);
     display.print(buf);
   }
@@ -221,7 +225,7 @@ void loop() {
     Serial.printf(" 6: %f : %f", p6, p6diff); Serial.println();
     Serial.println(p6Trend);
 
-    display.setCursor(130, 35);
+    display.setCursor(70, 35);
     display.setTextSize(1);
     display.setTextColor(EPD_BLACK);
     sprintf(buf, "%s", p6Trend);
@@ -369,10 +373,31 @@ void loop() {
   //readTrailer();
 
   client.stop();
+
+  // Measure the battery voltage
+  float measuredvbat = analogRead(VBAT_PIN);
+  measuredvbat *= 2;    // we divided by 2, so multiply back
+  measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+  measuredvbat /= 1024; // convert to voltage
+
+  display.setCursor(10, 92);
+  display.setTextSize(1);
+  display.setTextColor(EPD_RED);
+  sprintf(buf, "LBat: %1.2f V", measuredvbat);
+  Serial.println(buf);
+  display.print(buf);
+  
   
   display.display();
   Serial.println("Display done");
   //delay(300000);
+
+  digitalWrite(DONE_PIN, HIGH);
+  delay(10);
+  digitalWrite(DONE_PIN, LOW);
+  delay(1000);
+
+  Serial.println("We should never get here");
   
 }
 
