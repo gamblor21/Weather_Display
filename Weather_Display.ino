@@ -51,7 +51,7 @@ char server[] = "io.adafruit.com";    // name address for Google (using DNS)
 // Initialize the Ethernet client library
 // with the IP address and port of the server
 // that you want to connect to (port 80 is default for HTTP):
-WiFiSSLClient client;
+WiFiClient client;
 
 Adafruit_IL0373 display(212, 104, EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 
@@ -386,8 +386,16 @@ void loop() {
   sprintf(buf, "LBat: %1.2f V", measuredvbat);
   Serial.println(buf);
   display.print(buf);
-  
-  
+
+  if (getCurrentTimeFromWeb(buf) == true) {
+    display.setCursor(10, 82);
+    display.setTextSize(1);
+    display.setTextColor(EPD_BLACK);
+    Serial.println(buf);
+    display.print(buf);
+  }
+
+ 
   display.display();
   Serial.println("Display done");
   //delay(300000);
@@ -398,7 +406,6 @@ void loop() {
   delay(1000);
 
   Serial.println("We should never get here");
-  
 }
 
 
@@ -497,6 +504,54 @@ bool sendHTTPRequest(char* feed, byte limit, bool connClose, bool isChart) {
     client.println("Connection: close");
     
   client.println();
+
+  return true;
+}
+
+//http://worldtimeapi.org/api/timezone/America/Winnipeg
+bool getCurrentTimeFromWeb(char* timeString) {
+  if (client.connect("worldtimeapi.org", 80)) {
+    Serial.println(F("Client connected to world time api"));
+  }
+  else {
+    Serial.println(F("Client failed to connect to world time api"));
+    return false;
+  }
+
+  client.println("GET /api/timezone/America/Winnipeg HTTP/1.1");
+  client.println("Host: worldtimeapi.org");
+  client.println("Accept: */*");
+  //client.println("Connection: close");
+  client.println();
+
+  char status[255] = {0};
+  client.readBytesUntil('\r', status, sizeof(status));
+  if (strcmp(status, "HTTP/1.1 200 OK") != 0) {
+    Serial.print(F("Unexpected response: not 200"));
+    return false;
+  }
+
+  char endOfHeaders[] = "\r\n\r\n";
+  if (!client.find(endOfHeaders)) {
+    Serial.println(F("Invalid response"));
+    return false;
+  }
+
+  const size_t capacity = JSON_OBJECT_SIZE(15) + 360;
+  DynamicJsonDocument doc(capacity);
+  
+  // Parse JSON object
+  DeserializationError error = deserializeJson(doc, client);
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.c_str());
+    return false;
+  }
+  
+  const char* datetime = doc["datetime"]; // "2020-07-27T14:39:06.660033-05:00"
+  
+  memset(timeString, 0, strlen(timeString));
+  strncpy(timeString, datetime+11, 5); 
 
   return true;
 }
