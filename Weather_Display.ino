@@ -88,6 +88,7 @@ void setup() {
   // set the done pin for the TPL5111 to output
   pinMode(DONE_PIN, OUTPUT);
 
+  /* Only if RTC required
   rtc.begin(); // initialize RTC 24H format
   rtc.setTime(0, 0, 0);
   rtc.setDate(0, 0, 0);
@@ -96,24 +97,31 @@ void setup() {
 
   rtc.setAlarmTime(0, 0, 1);
   rtc.enableAlarm(rtc.MATCH_SS);
+  */
 }
 
-
+// Variables we will display
+float avgtemp = 0.0;
+float avgPressure = 0.0;
+char p6Trend[20] = "\0";
+float avgHumidity = 0.0;
+float avgWindSpeed = 0.0;
+float windGust = 0.0;
+float totalRain = 0.0;  
+float batVoltage = 0.0;
+float measuredvbat = 0.0;
+char currentTime[255] = "\0";
 
 void loop() {
-  char buf[255];  
+  char buf[255];
   //Serial.println("\nStarting connection to server...");
 
   while (!alarmWent) { delay(10); }
   alarmWent = false;
 
-  sprintf(buf, "Time is %2.2d:%2.2d:%2.2d", rtc.getHours(), rtc.getMinutes(), rtc.getSeconds());
-  Serial.println(buf);
+  //sprintf(buf, "Time is %2.2d:%2.2d:%2.2d", rtc.getHours(), rtc.getMinutes(), rtc.getSeconds());
+  //Serial.println(buf);
 
-  display.begin();
-  display.clearBuffer();
-  display.setTextWrap(true);
- 
   sendHTTPRequest("temperature", 5, false, false);
 
   if (checkHTTPStatus()) {
@@ -129,21 +137,15 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
+
+    readTrailer();
   
-    float avgtemp = 0.0;
     for (int i = 0; i < 5; i++) {
       avgtemp += doc[i]["value"].as<float>();
     }
+    
     avgtemp /= 5.0;
-    display.setCursor(10, 10);
-    display.setTextSize(2);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "Temp: %2.1fC", avgtemp);
-    Serial.println(buf);
-    display.print(buf);
   }
-
-  readTrailer();
 
 
   //Serial.println(F("Reading pressure..."));
@@ -161,22 +163,16 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
+
+    readTrailer();
   
-    float avgPressure = 0.0;
     for (int i = 0; i < 5; i++) {
       avgPressure += doc[i]["value"].as<float>();
     }
     avgPressure /= 5.0;
     currentPressure = avgPressure;
-    display.setCursor(10, 35);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "%2.1f kPa", avgPressure);
-    Serial.println(buf);
-    display.print(buf);
   }
 
-  readTrailer();
 
   // Read 48 hours of pressure to get trends
   sendHTTPRequest("pressure", 0, false, true);  
@@ -192,6 +188,8 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
+
+    readTrailer();
     
     JsonObject parameters = doc["parameters"];
     JsonArray data = doc["data"];
@@ -224,15 +222,7 @@ void loop() {
     Serial.printf("12: %f : %f", p12, p12diff); Serial.println();
     Serial.printf(" 6: %f : %f", p6, p6diff); Serial.println();
     Serial.println(p6Trend);
-
-    display.setCursor(70, 35);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "%s", p6Trend);
-    display.print(buf);
   }
-
-  readTrailer();
 
   //Serial.println(F("Reading humidity..."));
   sendHTTPRequest("humidity", 5, false, false);
@@ -248,25 +238,16 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
+
+    readTrailer();
   
-    float avgHumidity = 0.0;
     for (int i = 0; i < 5; i++) {
       avgHumidity += doc[i]["value"].as<float>();
     }
     avgHumidity /= 5.0;
-    display.setCursor(10, 47);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "Humidity: %2.1f %%RH", avgHumidity);
-    Serial.println(buf);
-    display.print(buf);
   }
 
-  readTrailer();
-
   //Serial.println(F("Reading wind..."));
-  float avgWindSpeed = 0.0;
-  
   sendHTTPRequest("wind-speed", 2, false, false);
 
   if (checkHTTPStatus()) {
@@ -280,6 +261,8 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
+
+    readTrailer();
   
     for (int i = 0; i < 2; i++) {
       avgWindSpeed += doc[i]["value"].as<float>();
@@ -287,7 +270,7 @@ void loop() {
     avgWindSpeed /= 2.0;
   }
 
-  readTrailer();
+
 
   sendHTTPRequest("wind-gust", 1, false, false);
 
@@ -303,17 +286,10 @@ void loop() {
       return;
     }
 
-    float windGust = doc[0]["value"].as<float>();
-    display.setCursor(10, 59);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "Wind: %2.1f km/h Gust: %2.1f km/h", avgWindSpeed, windGust);
-    Serial.println(buf);
-    display.print(buf);
+    readTrailer();
 
+    windGust = doc[0]["value"].as<float>();
   }
-
-  readTrailer();
 
 
   //Serial.println(F("Reading rain..."));
@@ -330,21 +306,15 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
-  
-    float totalRain = 0.0;
+
+    readTrailer();
+
     for (int i = 0; i < 60; i++) {
       totalRain += doc[i]["value"].as<float>();
     }
-    display.setCursor(10, 71);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    sprintf(buf, "Rain: %2.1fmm", totalRain);
-    Serial.println(buf);
-    display.print(buf);
   }
 
-  readTrailer();
-
+  
   //Serial.println(F("Reading battery..."));
   sendHTTPRequest("battery-voltage", 1, true, false);
 
@@ -359,15 +329,8 @@ void loop() {
       Serial.println(error.c_str());
       return;
     }
-  
-    float batVoltage = doc[0]["value"].as<float>();
 
-    display.setCursor(130, 92);
-    display.setTextSize(1);
-    display.setTextColor(EPD_RED);
-    sprintf(buf, "Bat: %1.2f V", batVoltage);
-    Serial.println(buf);
-    display.print(buf);
+    batVoltage = doc[0]["value"].as<float>();
   }
 
   //readTrailer();
@@ -375,30 +338,16 @@ void loop() {
   client.stop();
 
   // Measure the battery voltage
-  float measuredvbat = analogRead(VBAT_PIN);
+  measuredvbat = analogRead(VBAT_PIN);
   measuredvbat *= 2;    // we divided by 2, so multiply back
   measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
   measuredvbat /= 1024; // convert to voltage
 
-  display.setCursor(10, 92);
-  display.setTextSize(1);
-  display.setTextColor(EPD_RED);
-  sprintf(buf, "LBat: %1.2f V", measuredvbat);
-  Serial.println(buf);
-  display.print(buf);
+  getCurrentTimeFromWeb(currentTime);
 
-  if (getCurrentTimeFromWeb(buf) == true) {
-    display.setCursor(10, 82);
-    display.setTextSize(1);
-    display.setTextColor(EPD_BLACK);
-    Serial.println(buf);
-    display.print(buf);
-  }
-
- 
-  display.display();
+  displayValues();
+  
   Serial.println("Display done");
-  //delay(300000);
 
   digitalWrite(DONE_PIN, HIGH);
   delay(10);
@@ -406,6 +355,69 @@ void loop() {
   delay(1000);
 
   Serial.println("We should never get here");
+  while (true) { delay(1000); }
+}
+
+void displayValues() {
+  char buf[255];  
+
+  display.begin();
+  display.clearBuffer();
+  display.setTextWrap(true);
+
+  display.setTextColor(EPD_BLACK);
+  
+  display.setCursor(10, 10);
+  display.setTextSize(2);
+  sprintf(buf, "Temp: %2.1fC", avgtemp);
+  Serial.println(buf);
+  display.print(buf);
+
+  
+  display.setCursor(10, 35);
+  display.setTextSize(1);
+  sprintf(buf, "%2.1f kPa", avgPressure);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(70, 35);
+  sprintf(buf, "%s", p6Trend);
+  display.print(buf);
+
+  display.setCursor(10, 47);
+  sprintf(buf, "Humidity: %2.1f %%RH", avgHumidity);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(10, 59);
+  sprintf(buf, "Wind: %2.1f km/h Gust: %2.1f km/h", avgWindSpeed, windGust);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(10, 71);
+  sprintf(buf, "Rain: %2.1fmm", totalRain);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(130, 92);
+  display.setTextColor(EPD_RED);
+  sprintf(buf, "Bat: %1.2f V", batVoltage);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(10, 92);
+  display.setTextColor(EPD_RED);
+  sprintf(buf, "LBat: %1.2f V", measuredvbat);
+  Serial.println(buf);
+  display.print(buf);
+
+  display.setCursor(10, 82);
+  display.setTextSize(1);
+  display.setTextColor(EPD_BLACK);
+  Serial.println(currentTime);
+  display.print(currentTime);
+
+  display.display();
 }
 
 
@@ -425,6 +437,7 @@ void printWiFiStatus() {
   Serial.print(rssi);
   Serial.println(" dBm");
 }
+
 
 bool readTrailer() {
   char trailer[32] = {0};
@@ -556,6 +569,7 @@ bool getCurrentTimeFromWeb(char* timeString) {
   return true;
 }
 
+// Only needed if RTC in use
 void timerAlarm() {
   nextAlarmMinute = (nextAlarmMinute + 5) % 60;
   rtc.setAlarmTime(0, nextAlarmMinute, 0);
