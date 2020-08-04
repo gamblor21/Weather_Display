@@ -28,6 +28,15 @@ THE SOFTWARE.
 #include <Adafruit_GFX.h>    // Core graphics library
 #include "Adafruit_EPD.h"
 
+#include <Fonts/FreeSans4pt7b.h>
+#include <Fonts/FreeSans5pt7b.h>
+#include <Fonts/FreeSans6pt7b.h>
+#include <Fonts/FreeSans7pt7b.h>
+#include <Fonts/FreeSans8pt7b.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+
 #include <ArduinoJson.h>
 #include "arduino_secrets.h" 
 
@@ -106,6 +115,8 @@ float avgPressure = 0.0;
 char p6Trend[20] = "\0";
 float avgHumidity = 0.0;
 float avgWindSpeed = 0.0;
+int windDirection = 0.0;
+char windDirectionString[5] = "\0";
 float windGust = 0.0;
 float totalRain = 0.0;  
 float batVoltage = 0.0;
@@ -114,10 +125,10 @@ char currentTime[255] = "\0";
 
 void loop() {
   char buf[255];
-  //Serial.println("\nStarting connection to server...");
+  Serial.println("\nStarting connection to server...");
 
-  while (!alarmWent) { delay(10); }
-  alarmWent = false;
+  //while (!alarmWent) { delay(10); }
+  //alarmWent = false;
 
   //sprintf(buf, "Time is %2.2d:%2.2d:%2.2d", rtc.getHours(), rtc.getMinutes(), rtc.getSeconds());
   //Serial.println(buf);
@@ -203,7 +214,6 @@ void loop() {
     float p12diff = currentPressure - p12;
     float p6diff = currentPressure - p6;
 
-    char p6Trend[20] = "\0";
     if (abs(p6diff) > 0.35)
       sprintf(p6Trend, "Rapidly ");
 
@@ -270,8 +280,6 @@ void loop() {
     avgWindSpeed /= 2.0;
   }
 
-
-
   sendHTTPRequest("wind-gust", 1, false, false);
 
   if (checkHTTPStatus()) {
@@ -291,7 +299,27 @@ void loop() {
     windGust = doc[0]["value"].as<float>();
   }
 
+  //Serial.println(F("Reading wind dir..."));
+  sendHTTPRequest("wind-direction", 1, false, false);
 
+  if (checkHTTPStatus()) {
+    const size_t capacity = 5*JSON_ARRAY_SIZE(3) + JSON_ARRAY_SIZE(5) + 10*JSON_OBJECT_SIZE(2) + 5*JSON_OBJECT_SIZE(11) + 1350;
+    DynamicJsonDocument doc(capacity);
+  
+    // Parse JSON object
+    DeserializationError error = deserializeJson(doc, client);
+    if (error) {
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.c_str());
+      return;
+    }
+
+    readTrailer();
+
+    windDirection = doc[0]["value"].as<int>();
+    windDirectionToString(windDirection, windDirectionString);
+  }
+  
   //Serial.println(F("Reading rain..."));
   sendHTTPRequest("rain", 60, false, false);
 
@@ -359,67 +387,85 @@ void loop() {
 }
 
 void displayValues() {
-  char buf[255];  
-
+  char buf[255];
+  int16_t x1, y1;
+  uint16_t w, h;
+  
+  Serial.println("Display Values 2");
+  
   display.begin();
   display.clearBuffer();
-  display.setTextWrap(true);
+  display.setTextWrap(false);
 
   display.setTextColor(EPD_BLACK);
   
-  display.setCursor(10, 10);
-  display.setTextSize(2);
-  sprintf(buf, "Temp: %2.1fC", avgtemp);
-  Serial.println(buf);
-  display.print(buf);
-
-  
-  display.setCursor(10, 35);
   display.setTextSize(1);
-  sprintf(buf, "%2.1f kPa", avgPressure);
+  display.setFont(&FreeSansBold24pt7b);
+  sprintf(buf, "%2.1fC", avgtemp);
   Serial.println(buf);
+  display.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(106-(w/2), 37);
   display.print(buf);
 
-  display.setCursor(70, 35);
+  display.setFont(&FreeSans9pt7b);
+  sprintf(buf, "%2.1fkPa", avgPressure);
+  Serial.println(buf);
+  display.setCursor(2, 55);
+  display.print(buf);
+
+  display.setFont(&FreeSans7pt7b);
   sprintf(buf, "%s", p6Trend);
-  display.print(buf);
-
-  display.setCursor(10, 47);
-  sprintf(buf, "Humidity: %2.1f %%RH", avgHumidity);
   Serial.println(buf);
+  display.setCursor(5, 67);
   display.print(buf);
 
-  display.setCursor(10, 59);
-  sprintf(buf, "Wind: %2.1f km/h Gust: %2.1f km/h", avgWindSpeed, windGust);
+  display.setFont(&FreeSans9pt7b);
+  sprintf(buf, "%2.1f %%RH", avgHumidity);
   Serial.println(buf);
+  display.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(208-w, 55);
   display.print(buf);
 
-  display.setCursor(10, 71);
-  sprintf(buf, "Rain: %2.1fmm", totalRain);
+  display.setFont(&FreeSans8pt7b);
+  sprintf(buf, "%2.1f / %2.1f km/h %s %d", avgWindSpeed, windGust, windDirectionString, windDirection);
   Serial.println(buf);
+  display.setCursor(2, 85);
   display.print(buf);
 
-  display.setCursor(130, 92);
+  display.setFont(&FreeSans9pt7b);
+  sprintf(buf, "%2.1fmm", totalRain);
+  Serial.println(buf);
+  display.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(208-w, 70);
+  //display.setCursor(2, 90);
+  display.print(buf);
+
+  display.setFont();
   display.setTextColor(EPD_RED);
   sprintf(buf, "Bat: %1.2f V", batVoltage);
   Serial.println(buf);
+  display.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(208-w, 94);
   display.print(buf);
 
-  display.setCursor(10, 92);
+  display.setFont();
+  display.setCursor(2, 94);
   display.setTextColor(EPD_RED);
   sprintf(buf, "LBat: %1.2f V", measuredvbat);
   Serial.println(buf);
   display.print(buf);
 
-  display.setCursor(10, 82);
-  display.setTextSize(1);
+  display.setFont(&FreeSans7pt7b);
   display.setTextColor(EPD_BLACK);
   Serial.println(currentTime);
+  display.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(106-w, 94);
+  display.setCursor(90, 100);
   display.print(currentTime);
 
   display.display();
-}
 
+}
 
 void printWiFiStatus() {
   // print the SSID of the network you're attached to:
@@ -575,4 +621,13 @@ void timerAlarm() {
   rtc.setAlarmTime(0, nextAlarmMinute, 0);
   rtc.enableAlarm(rtc.MATCH_MMSS);
   alarmWent = true;
+}
+
+static char* directions[] = { "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW" };
+bool windDirectionToString(int degrees, char *dirString) {
+  int index = ((float)degrees + 11.25) / (float)22.5;
+  //Serial.println(index);
+  strcpy(dirString, directions[index%16]);
+  
+  return true;
 }
