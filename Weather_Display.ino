@@ -22,7 +22,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ******/
 
-#include <RTCZero.h>
+//#include <RTCZero.h>
+// Note on RTC
+
 #include <SPI.h>
 #include <WiFi101.h>
 #include <Adafruit_GFX.h>    // Core graphics library
@@ -45,35 +47,29 @@ THE SOFTWARE.
 #define SRAM_CS     11
 #define EPD_RESET   10 // can set to -1 and share with microcontroller Reset!
 #define EPD_BUSY    -1 // can set to -1 to not use a pin (will wait a fixed delay)
-#define DONE_PIN  5
+#define DONE_PIN  5 // For the TPL5111
 #define VBAT_PIN A7
 
 ///////please enter your sensitive data in the Secret tab/arduino_secrets.h
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
-int keyIndex = 0;            // your network key Index number (needed only for WEP)
 
 int status = WL_IDLE_STATUS;
 
 char server[] = "io.adafruit.com";    // name address for Google (using DNS)
 
-// Initialize the Ethernet client library
-// with the IP address and port of the server
-// that you want to connect to (port 80 is default for HTTP):
 WiFiClient client;
 
 Adafruit_IL0373 display(212, 104, EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 
-/* Create an rtc object */
-RTCZero rtc;
+//RTCZero rtc;
 
 int nextAlarmMinute = 0;
 volatile bool alarmWent = false;
 
 void setup() {
-  //Initialize serial and wait for port to open:
   Serial.begin(115200);
-  //while (!Serial) { ; }// wait for serial port to connect. Needed for native USB port only
+  //while (!Serial) { ; }
 
   WiFi.setPins(8,7,4,2);
 
@@ -88,11 +84,18 @@ void setup() {
   while (status != WL_CONNECTED) {
     Serial.print("Attempting to connect to SSID: ");
     Serial.println(ssid);
-    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
     status = WiFi.begin(ssid, pass);
   }
   Serial.println("Connected to wifi");
-  printWiFiStatus();
+  IPAddress ip = WiFi.localIP();
+  Serial.print("IP Address: ");
+  Serial.println(ip);
+
+  // print the received signal strength:
+  long rssi = WiFi.RSSI();
+  Serial.print("signal strength (RSSI):");
+  Serial.print(rssi);
+  Serial.println(" dBm");
 
   // set the done pin for the TPL5111 to output
   pinMode(DONE_PIN, OUTPUT);
@@ -124,20 +127,13 @@ float measuredvbat = 0.0;
 char currentTime[255] = "\0";
 
 void loop() {
-  char buf[255];
-  Serial.println("\nStarting connection to server...");
-
   //while (!alarmWent) { delay(10); }
   //alarmWent = false;
 
-  //sprintf(buf, "Time is %2.2d:%2.2d:%2.2d", rtc.getHours(), rtc.getMinutes(), rtc.getSeconds());
-  //Serial.println(buf);
-
+  // Read temperature
   sendHTTPRequest("temperature", 5, false, false);
 
   if (checkHTTPStatus()) {
-    // Allocate the JSON document
-    // Use arduinojson.org/v6/assistant to compute the capacity.
     const size_t capacity = 5*JSON_ARRAY_SIZE(3) + JSON_ARRAY_SIZE(5) + 10*JSON_OBJECT_SIZE(2) + 5*JSON_OBJECT_SIZE(11) + 5000;
     DynamicJsonDocument doc(capacity);
   
@@ -146,20 +142,19 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-  
-    for (int i = 0; i < 5; i++) {
-      avgtemp += doc[i]["value"].as<float>();
-    }
+    else {
+      readTrailer();
     
-    avgtemp /= 5.0;
+      for (int i = 0; i < 5; i++) {
+        avgtemp += doc[i]["value"].as<float>();
+      }
+      
+      avgtemp /= 5.0;
+    }
   }
 
-
-  //Serial.println(F("Reading pressure..."));
+  // Read Pressure
   sendHTTPRequest("pressure", 5, false, false);
 
   float currentPressure = 0.0;
@@ -172,16 +167,16 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-  
-    for (int i = 0; i < 5; i++) {
-      avgPressure += doc[i]["value"].as<float>();
+    else {
+      readTrailer();
+    
+      for (int i = 0; i < 5; i++) {
+        avgPressure += doc[i]["value"].as<float>();
+      }
+      avgPressure /= 5.0;
+      currentPressure = avgPressure;
     }
-    avgPressure /= 5.0;
-    currentPressure = avgPressure;
   }
 
 
@@ -197,44 +192,40 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
+    else {
+      readTrailer();
+      
+      JsonObject parameters = doc["parameters"];
+      JsonArray data = doc["data"];
 
-    readTrailer();
-    
-    JsonObject parameters = doc["parameters"];
-    JsonArray data = doc["data"];
-    float p48 = data[0][1].as<float>();
-    float p24 = data[24][1].as<float>();
-    float p12 = data[36][1].as<float>();
-    float p6 = data[42][1].as<float>();
-
-    float p48diff = currentPressure - p48;
-    float p24diff = currentPressure - p24;
-    float p12diff = currentPressure - p12;
-    float p6diff = currentPressure - p6;
-
-    if (abs(p6diff) > 0.35)
-      sprintf(p6Trend, "Rapidly ");
-
-    if(abs(p6diff) < 0.15) {
-      sprintf(p6Trend, "Steady");
+      // Look at several tends but right now only display the 6 hour trend
+      float p48 = data[0][1].as<float>();
+      float p24 = data[24][1].as<float>();
+      float p12 = data[36][1].as<float>();
+      float p6 = data[42][1].as<float>();
+  
+      float p48diff = currentPressure - p48;
+      float p24diff = currentPressure - p24;
+      float p12diff = currentPressure - p12;
+      float p6diff = currentPressure - p6;
+  
+      if (abs(p6diff) > 0.35)
+        sprintf(p6Trend, "Rapidly ");
+  
+      if(abs(p6diff) < 0.15) {
+        sprintf(p6Trend, "Steady");
+      }
+      else if (p6diff > 0.15) {
+        sprintf(p6Trend, "%sRising", p6Trend);
+      }
+      else if (p6diff < 0.15) {
+        sprintf(p6Trend, "%sFalling", p6Trend);
+      }
     }
-    else if (p6diff > 0.15) {
-      sprintf(p6Trend, "%sRising", p6Trend);
-    }
-    else if (p6diff < 0.15) {
-      sprintf(p6Trend, "%sFalling", p6Trend);
-    }
-    
-    Serial.printf("48: %f : %f", p48, p48diff); Serial.println();
-    Serial.printf("24: %f : %f", p24, p24diff); Serial.println();
-    Serial.printf("12: %f : %f", p12, p12diff); Serial.println();
-    Serial.printf(" 6: %f : %f", p6, p6diff); Serial.println();
-    Serial.println(p6Trend);
   }
 
-  //Serial.println(F("Reading humidity..."));
+  // Read Humidty
   sendHTTPRequest("humidity", 5, false, false);
 
   if (checkHTTPStatus()) {
@@ -246,18 +237,18 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-  
-    for (int i = 0; i < 5; i++) {
-      avgHumidity += doc[i]["value"].as<float>();
+    else {
+      readTrailer();
+    
+      for (int i = 0; i < 5; i++) {
+        avgHumidity += doc[i]["value"].as<float>();
+      }
+      avgHumidity /= 5.0;
     }
-    avgHumidity /= 5.0;
   }
 
-  //Serial.println(F("Reading wind..."));
+  // Reading wind speed
   sendHTTPRequest("wind-speed", 2, false, false);
 
   if (checkHTTPStatus()) {
@@ -269,17 +260,18 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-  
-    for (int i = 0; i < 2; i++) {
-      avgWindSpeed += doc[i]["value"].as<float>();
+    else {
+      readTrailer();
+    
+      for (int i = 0; i < 2; i++) {
+        avgWindSpeed += doc[i]["value"].as<float>();
+      }
+      avgWindSpeed /= 2.0;
     }
-    avgWindSpeed /= 2.0;
   }
 
+  // Read wind gust
   sendHTTPRequest("wind-gust", 1, false, false);
 
   if (checkHTTPStatus()) {
@@ -291,15 +283,15 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-
-    windGust = doc[0]["value"].as<float>();
+    else {
+      readTrailer();
+  
+      windGust = doc[0]["value"].as<float>();
+    }
   }
 
-  //Serial.println(F("Reading wind dir..."));
+  // Read wind direction
   sendHTTPRequest("wind-direction", 1, false, false);
 
   if (checkHTTPStatus()) {
@@ -311,16 +303,16 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-
-    windDirection = doc[0]["value"].as<int>();
-    windDirectionToString(windDirection, windDirectionString);
+    else {
+      readTrailer();
+  
+      windDirection = doc[0]["value"].as<int>();
+      windDirectionToString(windDirection, windDirectionString);
+    }
   }
   
-  //Serial.println(F("Reading rain..."));
+  // Reading rain in the last 60 minutes
   sendHTTPRequest("rain", 60, false, false);
 
   if (checkHTTPStatus()) {
@@ -332,18 +324,17 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    readTrailer();
-
-    for (int i = 0; i < 60; i++) {
-      totalRain += doc[i]["value"].as<float>();
+    else {
+      readTrailer();
+  
+      for (int i = 0; i < 60; i++) {
+        totalRain += doc[i]["value"].as<float>();
+      }
     }
   }
-
   
-  //Serial.println(F("Reading battery..."));
+  // Reading remote battery level
   sendHTTPRequest("battery-voltage", 1, true, false);
 
   if (checkHTTPStatus()) {
@@ -355,28 +346,27 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
-      return;
     }
-
-    batVoltage = doc[0]["value"].as<float>();
+    else {
+      batVoltage = doc[0]["value"].as<float>();
+    }
   }
-
-  //readTrailer();
 
   client.stop();
 
-  // Measure the battery voltage
+  // Measure the local battery voltage
   measuredvbat = analogRead(VBAT_PIN);
   measuredvbat *= 2;    // we divided by 2, so multiply back
   measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
   measuredvbat /= 1024; // convert to voltage
 
+  // Read the time from worldtimeapi.org
   getCurrentTimeFromWeb(currentTime);
 
+  // Display all the values
   displayValues();
-  
-  Serial.println("Display done");
 
+  // Signal the TPS5111 we are done and to power everything down
   digitalWrite(DONE_PIN, HIGH);
   delay(10);
   digitalWrite(DONE_PIN, LOW);
@@ -386,12 +376,11 @@ void loop() {
   while (true) { delay(1000); }
 }
 
+// Display all the values read to the eInk display
 void displayValues() {
   char buf[255];
   int16_t x1, y1;
   uint16_t w, h;
-  
-  Serial.println("Display Values 2");
   
   display.begin();
   display.clearBuffer();
@@ -464,27 +453,9 @@ void displayValues() {
   display.print(currentTime);
 
   display.display();
-
 }
 
-void printWiFiStatus() {
-  // print the SSID of the network you're attached to:
-  Serial.print("SSID: ");
-  Serial.println(WiFi.SSID());
-
-  // print your WiFi shield's IP address:
-  IPAddress ip = WiFi.localIP();
-  Serial.print("IP Address: ");
-  Serial.println(ip);
-
-  // print the received signal strength:
-  long rssi = WiFi.RSSI();
-  Serial.print("signal strength (RSSI):");
-  Serial.print(rssi);
-  Serial.println(" dBm");
-}
-
-
+// Read the data after the JSON request. We can then use keep-alives to reuse the connections
 bool readTrailer() {
   char trailer[32] = {0};
   client.readBytesUntil('\r', trailer, sizeof(trailer));
@@ -498,6 +469,7 @@ bool readTrailer() {
   return true;
 }
 
+// For a new connection make sure we got a 200 response and read the headers we are ignoring
 bool checkHTTPStatus() {
     // Check HTTP status
     char status[32] = {0};
@@ -530,6 +502,8 @@ bool checkHTTPStatus() {
     }
 }
 
+// Send an HTTP request to Adafruit IO takes the feed name, the limit of how many records to return, if the connection
+// should be kept open and do we want the raw data or a summary of 48 hours at 60 minute resolution
 bool sendHTTPRequest(char* feed, byte limit, bool connClose, bool isChart) {
   // if not connected connect
   if (client.connected() == false) {
@@ -567,7 +541,7 @@ bool sendHTTPRequest(char* feed, byte limit, bool connClose, bool isChart) {
   return true;
 }
 
-//http://worldtimeapi.org/api/timezone/America/Winnipeg
+// Gets the current time from worldtimeapi.org and save the time string to the timeString buffer
 bool getCurrentTimeFromWeb(char* timeString) {
   if (client.connect("worldtimeapi.org", 80)) {
     Serial.println(F("Client connected to world time api"));
@@ -580,7 +554,6 @@ bool getCurrentTimeFromWeb(char* timeString) {
   client.println("GET /api/timezone/America/Winnipeg HTTP/1.1");
   client.println("Host: worldtimeapi.org");
   client.println("Accept: */*");
-  //client.println("Connection: close");
   client.println();
 
   char status[255] = {0};
@@ -615,15 +588,21 @@ bool getCurrentTimeFromWeb(char* timeString) {
   return true;
 }
 
-// Only needed if RTC in use
+/*
+ * Only needed if RTC in use
 void timerAlarm() {
   nextAlarmMinute = (nextAlarmMinute + 5) % 60;
   rtc.setAlarmTime(0, nextAlarmMinute, 0);
   rtc.enableAlarm(rtc.MATCH_MMSS);
   alarmWent = true;
 }
+*/
 
+/* 
+ *Translate the wind in degrees to a cardinal direction
+ */
 static char* directions[] = { "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW" };
+
 bool windDirectionToString(int degrees, char *dirString) {
   int index = ((float)degrees + 11.25) / (float)22.5;
   //Serial.println(index);
