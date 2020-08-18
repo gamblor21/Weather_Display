@@ -30,17 +30,13 @@ THE SOFTWARE.
 #include <Adafruit_GFX.h>    // Core graphics library
 #include "Adafruit_EPD.h"
 
-#include <Fonts/FreeSans4pt7b.h>
-#include <Fonts/FreeSans5pt7b.h>
-#include <Fonts/FreeSans6pt7b.h>
 #include <Fonts/FreeSans7pt7b.h>
 #include <Fonts/FreeSans8pt7b.h>
 #include <Fonts/FreeSans9pt7b.h>
-#include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 
 #include <ArduinoJson.h>
-#include "arduino_secrets.h" 
+#include "secrets.h" 
 
 #define EPD_CS     13
 #define EPD_DC      12
@@ -50,19 +46,18 @@ THE SOFTWARE.
 #define DONE_PIN  5 // For the TPL5111
 #define VBAT_PIN A7
 
-///////please enter your sensitive data in the Secret tab/arduino_secrets.h
-char ssid[] = SECRET_SSID;        // your network SSID (name)
+char ssid[] = SECRET_SSID;     // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 
 int status = WL_IDLE_STATUS;
 
 char server[] = "io.adafruit.com";    // name address for Google (using DNS)
+char adafruit_user[] = "Gamblor21"; // user on Adafruit IO we are pulling requests from
+char timezone[] = "America/Winnipeg"; // timezone to request from worldtimeapi.org
 
 WiFiClient client;
 
 Adafruit_IL0373 display(212, 104, EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
-
-//RTCZero rtc;
 
 int nextAlarmMinute = 0;
 volatile bool alarmWent = false;
@@ -99,17 +94,6 @@ void setup() {
 
   // set the done pin for the TPL5111 to output
   pinMode(DONE_PIN, OUTPUT);
-
-  /* Only if RTC required
-  rtc.begin(); // initialize RTC 24H format
-  rtc.setTime(0, 0, 0);
-  rtc.setDate(0, 0, 0);
-  
-  rtc.attachInterrupt(timerAlarm);
-
-  rtc.setAlarmTime(0, 0, 1);
-  rtc.enableAlarm(rtc.MATCH_SS);
-  */
 }
 
 // Variables we will display
@@ -127,9 +111,6 @@ float measuredvbat = 0.0;
 char currentTime[255] = "\0";
 
 void loop() {
-  //while (!alarmWent) { delay(10); }
-  //alarmWent = false;
-
   // Read temperature
   sendHTTPRequest("temperature", 5, false, false);
 
@@ -142,6 +123,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -167,6 +149,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -192,6 +175,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -237,6 +221,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -260,6 +245,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -283,6 +269,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -303,6 +290,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -324,6 +312,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       readTrailer();
@@ -346,6 +335,7 @@ void loop() {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.c_str());
+      client.stop();
     }
     else {
       batVoltage = doc[0]["value"].as<float>();
@@ -519,11 +509,11 @@ bool sendHTTPRequest(char* feed, byte limit, bool connClose, bool isChart) {
   char request[200];
   if (isChart == true) {
     // hard coded right now to 1 hour resolution for 48 hours or data
-    sprintf(request, "GET /api/v2/Gamblor21/feeds/%s/data/chart?hours=48&resolution=60", feed);
+    sprintf(request, "GET /api/v2/%s/feeds/%s/data/chart?hours=48&resolution=60", adafruit_user, feed);
     sprintf(request, "%s HTTP/1.1", request);
    }
   else {  
-    sprintf(request, "GET /api/v2/Gamblor21/feeds/%s/data?include=value", feed);
+    sprintf(request, "GET /api/v2/%s/feeds/%s/data?include=value", adafruit_user, feed);
     if (limit > 0)
       sprintf(request, "%s&limit=%d HTTP/1.1", request, limit);
     else
@@ -551,7 +541,9 @@ bool getCurrentTimeFromWeb(char* timeString) {
     return false;
   }
 
-  client.println("GET /api/timezone/America/Winnipeg HTTP/1.1");
+  char buf[255];
+  sprintf(buf, "GET /api/timezone/%s HTTP/1.1", timezone);
+  client.println(buf);
   client.println("Host: worldtimeapi.org");
   client.println("Accept: */*");
   client.println();
@@ -577,6 +569,7 @@ bool getCurrentTimeFromWeb(char* timeString) {
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.c_str());
+    client.stop();
     return false;
   }
   
@@ -587,16 +580,6 @@ bool getCurrentTimeFromWeb(char* timeString) {
 
   return true;
 }
-
-/*
- * Only needed if RTC in use
-void timerAlarm() {
-  nextAlarmMinute = (nextAlarmMinute + 5) % 60;
-  rtc.setAlarmTime(0, nextAlarmMinute, 0);
-  rtc.enableAlarm(rtc.MATCH_MMSS);
-  alarmWent = true;
-}
-*/
 
 /* 
  *Translate the wind in degrees to a cardinal direction
