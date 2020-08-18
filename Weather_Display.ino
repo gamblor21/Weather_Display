@@ -30,8 +30,8 @@ THE SOFTWARE.
 #include <Adafruit_GFX.h>    // Core graphics library
 #include "Adafruit_EPD.h"
 
-#include <Fonts/FreeSans7pt7b.h>
-#include <Fonts/FreeSans8pt7b.h>
+#include "FreeSans7pt7b.h"
+#include "FreeSans8pt7b.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 
